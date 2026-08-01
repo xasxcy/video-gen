@@ -182,22 +182,42 @@ def poll_operation(
 def expected_output_paths(output: Path, sample_count: int) -> list[Path]:
     """Derive the per-sample destination paths save_videos() will write to.
 
-    sample_count is the requested count; the actual response may return fewer videos
-    (e.g. some filtered by RAI checks), but the naming scheme only depends on whether
-    more than one file *could* be produced, so this over-approximates safely for the
-    pre-flight existence check in main().
+    Naming depends only on the *requested* sample_count, never on how many videos the
+    API actually returns (which can be fewer, e.g. some filtered by RAI checks) — that
+    keeps this function and save_videos() using the exact same paths, so a pre-flight
+    check here can't miss a collision that save_videos() would hit after paying for
+    the generation.
     """
     if sample_count <= 1:
         return [output]
     return [output.with_name(output.stem + f"-{i}" + output.suffix) for i in range(sample_count)]
 
 
-def _write_atomic(dest: Path, data: bytes | str, *, force: bool, text: bool = False) -> None:
-    if dest.exists() and not force:
+def _write_exclusive(dest: Path, data: bytes | str, *, text: bool = False) -> None:
+    """Create dest only if it doesn't already exist, atomically (no check-then-write gap).
+
+    Uses O_EXCL so two concurrent calls targeting the same dest can't both "pass" a
+    prior os.path.exists() check and then race each other via a temp-file replace —
+    the OS guarantees only one open() with O_CREAT|O_EXCL succeeds.
+    """
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        fd = os.open(dest, flags)
+    except FileExistsError:
         raise FileExistsError(
             f"{dest} already exists; pass --force to overwrite (a completed generation costs real "
             "money, so this tool refuses to silently clobber a prior result)"
-        )
+        ) from None
+    try:
+        with os.fdopen(fd, "w" if text else "wb") as f:
+            f.write(data)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
+
+def _write_atomic_force(dest: Path, data: bytes | str, *, text: bool = False) -> None:
+    """Overwrite dest via a unique temp file + atomic rename (force=True path)."""
     fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=dest.name + ".", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
@@ -209,7 +229,7 @@ def _write_atomic(dest: Path, data: bytes | str, *, force: bool, text: bool = Fa
         raise
 
 
-def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
+def save_videos(payload: dict, output: Path, sample_count: int = 1, force: bool = False) -> list[Path]:
     response = payload.get("response")
     if not response:
         raise RuntimeError(f"operation finished with no response payload: {json.dumps(payload)[:2000]}")
@@ -223,13 +243,13 @@ def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
     if not videos:
         raise RuntimeError(f"no videos in response: {json.dumps(response)[:2000]}")
 
+    dests = expected_output_paths(output, sample_count)[: len(videos)]
+
     # Fail before writing anything if *any* target collides — otherwise a collision on
     # a later sample would leave earlier (paid-for) samples written and the rest lost.
+    # (This is a best-effort early exit for the common case; _write_exclusive() below is
+    # what actually guarantees no overwrite, since this check alone has a TOCTOU gap.)
     if not force:
-        dests = [
-            output.with_name(output.stem + ("" if len(videos) == 1 else f"-{i}") + output.suffix)
-            for i in range(len(videos))
-        ]
         existing = [d for d in dests if d.exists()]
         if existing:
             raise FileExistsError(
@@ -238,13 +258,18 @@ def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
             )
 
     saved = []
-    for i, video in enumerate(videos):
-        suffix = "" if len(videos) == 1 else f"-{i}"
-        dest = output.with_name(output.stem + suffix + output.suffix)
+    for dest, video in zip(dests, videos):
         if "bytesBase64Encoded" in video:
-            _write_atomic(dest, base64.b64decode(video["bytesBase64Encoded"]), force=force)
+            data = base64.b64decode(video["bytesBase64Encoded"])
+            if force:
+                _write_atomic_force(dest, data)
+            else:
+                _write_exclusive(dest, data)
         elif "gcsUri" in video:
-            _write_atomic(dest, video["gcsUri"], force=force, text=True)
+            if force:
+                _write_atomic_force(dest, video["gcsUri"], text=True)
+            else:
+                _write_exclusive(dest, video["gcsUri"], text=True)
             print(
                 f"video stored in Cloud Storage, wrote its URI to {dest} "
                 f"(download separately with: gcloud storage cp '{video['gcsUri']}' <local-path>)",
@@ -326,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        saved = save_videos(payload, output, force=args.force)
+        saved = save_videos(payload, output, sample_count=args.sample_count, force=args.force)
     except (RuntimeError, FileExistsError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

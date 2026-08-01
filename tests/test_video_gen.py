@@ -195,7 +195,7 @@ def test_expected_output_paths_multi_sample():
 
 def test_save_videos_multi_sample_writes_all_files(tmp_path):
     out = tmp_path / "output.mp4"
-    saved = video_gen.save_videos(_multi_sample_payload(3), out)
+    saved = video_gen.save_videos(_multi_sample_payload(3), out, sample_count=3)
     assert [p.name for p in saved] == ["output-0.mp4", "output-1.mp4", "output-2.mp4"]
     assert (tmp_path / "output-1.mp4").read_bytes() == b"video-1"
 
@@ -204,10 +204,23 @@ def test_save_videos_multi_sample_refuses_if_any_target_collides(tmp_path):
     out = tmp_path / "output.mp4"
     (tmp_path / "output-1.mp4").write_bytes(b"pre-existing, do not touch")
     with pytest.raises(FileExistsError, match="output-1.mp4"):
-        video_gen.save_videos(_multi_sample_payload(3), out)
+        video_gen.save_videos(_multi_sample_payload(3), out, sample_count=3)
     # Nothing should have been written for the other samples either — fail before writing any.
     assert not (tmp_path / "output-0.mp4").exists()
     assert (tmp_path / "output-1.mp4").read_bytes() == b"pre-existing, do not touch"
+
+
+def test_save_videos_naming_follows_requested_not_returned_count(tmp_path):
+    # Requested 3 samples but the API only returned 1 (e.g. others RAI-filtered without
+    # raiMediaFilteredCount catching it, or just server-side variance). Naming must still
+    # follow the *requested* count (output-0.mp4), matching what expected_output_paths()
+    # told main()'s pre-flight check to look for — otherwise a bare output.mp4 collision
+    # would slip past pre-flight and only surface after paying for the generation.
+    out = tmp_path / "output.mp4"
+    (tmp_path / "output.mp4").write_bytes(b"unrelated file, must not be touched")
+    saved = video_gen.save_videos(_multi_sample_payload(1), out, sample_count=3)
+    assert [p.name for p in saved] == ["output-0.mp4"]
+    assert (tmp_path / "output.mp4").read_bytes() == b"unrelated file, must not be touched"
 
 
 def test_save_videos_overwrites_with_force(tmp_path):
@@ -224,7 +237,18 @@ def test_save_videos_does_not_leave_tmp_file_behind(tmp_path):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_write_atomic_cleans_up_tmp_on_write_failure(tmp_path, monkeypatch):
+def test_write_exclusive_refuses_even_if_file_appears_after_the_precheck(tmp_path):
+    # Simulates the TOCTOU window a concurrent process could win: the file didn't exist
+    # when save_videos() did its pre-flight check, but exists by the time we actually try
+    # to create it. O_CREAT|O_EXCL must still refuse rather than silently overwriting.
+    dest = tmp_path / "output.mp4"
+    dest.write_bytes(b"written by a concurrent run, must survive")
+    with pytest.raises(FileExistsError, match="already exists"):
+        video_gen._write_exclusive(dest, b"this must not land")
+    assert dest.read_bytes() == b"written by a concurrent run, must survive"
+
+
+def test_write_exclusive_cleans_up_on_write_failure(tmp_path, monkeypatch):
     dest = tmp_path / "output.mp4"
 
     class ExplodingFile:
@@ -239,12 +263,31 @@ def test_write_atomic_cleans_up_tmp_on_write_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fdopen", lambda fd, mode: ExplodingFile())
     with pytest.raises(OSError, match="disk full"):
-        video_gen._write_atomic(dest, b"data", force=False)
+        video_gen._write_exclusive(dest, b"data")
+    assert not dest.exists()
+
+
+def test_write_atomic_force_cleans_up_tmp_on_write_failure(tmp_path, monkeypatch):
+    dest = tmp_path / "output.mp4"
+
+    class ExplodingFile:
+        def write(self, data):
+            raise OSError("disk full")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(os, "fdopen", lambda fd, mode: ExplodingFile())
+    with pytest.raises(OSError, match="disk full"):
+        video_gen._write_atomic_force(dest, b"data")
     assert not dest.exists()
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_write_atomic_uses_unique_tmp_names(tmp_path):
+def test_write_atomic_force_uses_unique_tmp_names(tmp_path):
     # Two concurrent-ish calls (simulated sequentially) must not collide on the same
     # fixed .tmp filename — mkstemp gives each call a distinct name.
     dest1 = tmp_path / "output.mp4"
