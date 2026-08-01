@@ -9,6 +9,7 @@ import json
 import mimetypes
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -178,18 +179,34 @@ def poll_operation(
         time.sleep(poll_interval)
 
 
+def expected_output_paths(output: Path, sample_count: int) -> list[Path]:
+    """Derive the per-sample destination paths save_videos() will write to.
+
+    sample_count is the requested count; the actual response may return fewer videos
+    (e.g. some filtered by RAI checks), but the naming scheme only depends on whether
+    more than one file *could* be produced, so this over-approximates safely for the
+    pre-flight existence check in main().
+    """
+    if sample_count <= 1:
+        return [output]
+    return [output.with_name(output.stem + f"-{i}" + output.suffix) for i in range(sample_count)]
+
+
 def _write_atomic(dest: Path, data: bytes | str, *, force: bool, text: bool = False) -> None:
     if dest.exists() and not force:
         raise FileExistsError(
             f"{dest} already exists; pass --force to overwrite (a completed generation costs real "
             "money, so this tool refuses to silently clobber a prior result)"
         )
-    tmp = dest.with_name(dest.name + ".tmp")
-    if text:
-        tmp.write_text(data, encoding="utf-8")
-    else:
-        tmp.write_bytes(data)
-    tmp.replace(dest)  # atomic on POSIX; avoids leaving a truncated dest on a write failure
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=dest.name + ".", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w" if text else "wb") as f:
+            f.write(data)
+        tmp.replace(dest)  # atomic on POSIX; avoids leaving a truncated dest on a write failure
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
@@ -205,6 +222,20 @@ def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
     videos = response.get("videos", [])
     if not videos:
         raise RuntimeError(f"no videos in response: {json.dumps(response)[:2000]}")
+
+    # Fail before writing anything if *any* target collides — otherwise a collision on
+    # a later sample would leave earlier (paid-for) samples written and the rest lost.
+    if not force:
+        dests = [
+            output.with_name(output.stem + ("" if len(videos) == 1 else f"-{i}") + output.suffix)
+            for i in range(len(videos))
+        ]
+        existing = [d for d in dests if d.exists()]
+        if existing:
+            raise FileExistsError(
+                f"{len(existing)} of {len(dests)} target file(s) already exist "
+                f"({', '.join(str(d) for d in existing)}); pass --force to overwrite"
+            )
 
     saved = []
     for i, video in enumerate(videos):
@@ -266,9 +297,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     output = Path(args.output)
-    if output.exists() and not args.force:
-        print(f"error: {output} already exists; pass --force to overwrite", file=sys.stderr)
-        return 2
+    if not args.force:
+        existing = [p for p in expected_output_paths(output, args.sample_count) if p.exists()]
+        if existing:
+            print(
+                f"error: {', '.join(str(p) for p in existing)} already exist(s); pass --force to overwrite",
+                file=sys.stderr,
+            )
+            return 2
 
     try:
         validate_duration(args.model, args.duration)

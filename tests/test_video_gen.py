@@ -1,7 +1,9 @@
 import argparse
 import base64
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -161,9 +163,51 @@ def _inline_payload(data: bytes = b"fakevideo") -> dict:
 def test_save_videos_refuses_to_overwrite_existing_file(tmp_path):
     out = tmp_path / "output.mp4"
     out.write_bytes(b"previous result, cost real money")
-    with pytest.raises(FileExistsError, match="already exists"):
+    with pytest.raises(FileExistsError, match="already exist"):
         video_gen.save_videos(_inline_payload(), out)
     assert out.read_bytes() == b"previous result, cost real money"
+
+
+def _multi_sample_payload(n: int) -> dict:
+    return {
+        "done": True,
+        "response": {
+            "raiMediaFilteredCount": 0,
+            "videos": [
+                {"bytesBase64Encoded": base64.b64encode(f"video-{i}".encode()).decode(), "mimeType": "video/mp4"}
+                for i in range(n)
+            ],
+        },
+    }
+
+
+def test_expected_output_paths_single_sample():
+    out = Path("output.mp4")
+    assert video_gen.expected_output_paths(out, 1) == [out]
+
+
+def test_expected_output_paths_multi_sample():
+    out = Path("output.mp4")
+    assert video_gen.expected_output_paths(out, 3) == [
+        Path("output-0.mp4"), Path("output-1.mp4"), Path("output-2.mp4"),
+    ]
+
+
+def test_save_videos_multi_sample_writes_all_files(tmp_path):
+    out = tmp_path / "output.mp4"
+    saved = video_gen.save_videos(_multi_sample_payload(3), out)
+    assert [p.name for p in saved] == ["output-0.mp4", "output-1.mp4", "output-2.mp4"]
+    assert (tmp_path / "output-1.mp4").read_bytes() == b"video-1"
+
+
+def test_save_videos_multi_sample_refuses_if_any_target_collides(tmp_path):
+    out = tmp_path / "output.mp4"
+    (tmp_path / "output-1.mp4").write_bytes(b"pre-existing, do not touch")
+    with pytest.raises(FileExistsError, match="output-1.mp4"):
+        video_gen.save_videos(_multi_sample_payload(3), out)
+    # Nothing should have been written for the other samples either — fail before writing any.
+    assert not (tmp_path / "output-0.mp4").exists()
+    assert (tmp_path / "output-1.mp4").read_bytes() == b"pre-existing, do not touch"
 
 
 def test_save_videos_overwrites_with_force(tmp_path):
@@ -177,7 +221,38 @@ def test_save_videos_overwrites_with_force(tmp_path):
 def test_save_videos_does_not_leave_tmp_file_behind(tmp_path):
     out = tmp_path / "output.mp4"
     video_gen.save_videos(_inline_payload(), out)
-    assert not out.with_name(out.name + ".tmp").exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_atomic_cleans_up_tmp_on_write_failure(tmp_path, monkeypatch):
+    dest = tmp_path / "output.mp4"
+
+    class ExplodingFile:
+        def write(self, data):
+            raise OSError("disk full")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(os, "fdopen", lambda fd, mode: ExplodingFile())
+    with pytest.raises(OSError, match="disk full"):
+        video_gen._write_atomic(dest, b"data", force=False)
+    assert not dest.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_atomic_uses_unique_tmp_names(tmp_path):
+    # Two concurrent-ish calls (simulated sequentially) must not collide on the same
+    # fixed .tmp filename — mkstemp gives each call a distinct name.
+    dest1 = tmp_path / "output.mp4"
+    fd, tmp_name_1 = tempfile.mkstemp(dir=dest1.parent, prefix=dest1.name + ".", suffix=".tmp")
+    os.close(fd)
+    fd, tmp_name_2 = tempfile.mkstemp(dir=dest1.parent, prefix=dest1.name + ".", suffix=".tmp")
+    os.close(fd)
+    assert tmp_name_1 != tmp_name_2
 
 
 def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):
