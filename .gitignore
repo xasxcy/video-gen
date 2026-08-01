@@ -1,0 +1,13 @@
+.env
+*.key.json
+*-key.json
+service-account*.json
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+output*.mp4
+/tests/fixtures/*.mp4
+.DS_Store
