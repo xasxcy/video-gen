@@ -47,6 +47,14 @@ uv run video_gen.py "..." --image ./portrait.png \
 
 Run `uv run video_gen.py --help` for the full flag list.
 
+Supported models: `veo-3.1-lite-generate-001` (default), `veo-3.1-fast-generate-001`,
+`veo-3.1-generate-001`. Veo 2 and the Veo 3.0 line are **not** supported — Google retired them on
+2026-06-30; the CLI rejects those model IDs with a clear error instead of burning a request on a
+dead endpoint.
+
+By default the CLI refuses to overwrite an existing `--output` path (a completed generation costs
+real money) — pass `--force` if you actually want to replace it.
+
 ## Cost
 
 Default model is `veo-3.1-lite-generate-001` at `--duration 4`, the cheapest combination

@@ -11,9 +11,14 @@ metadata:
 
 # Video Generation (Veo on Vertex AI)
 
-Calls Google Veo (`veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, `veo-3.1-lite-generate-001`, `veo-2.0-generate-001`, ...)
+Calls Google Veo (`veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, `veo-3.1-lite-generate-001`)
 through Vertex AI's `predictLongRunning` REST API. Supports text-to-video and image-to-video
 (first frame, optionally first+last frame).
+
+`veo-2.0-generate-001`, `veo-3.0-generate-001` and `veo-3.0-fast-generate-001` are **not** supported —
+Google retired all three on 2026-06-30 (confirmed on their model-garden pages) and requests against
+them now fail outright. `video_gen.py` rejects them with a clear error rather than silently making a
+doomed API call.
 
 ## Script Directory
 
@@ -58,8 +63,8 @@ python3 {baseDir}/video_gen.py "morph smoothly between the two poses" \
 | `--image` | Local path, first frame (image-to-video) | none (text-to-video) |
 | `--last-frame` | Local path, last frame (interpolation) | none |
 | `-o`, `--output` | Output video path | `output.mp4` |
-| `--model` | Veo model ID | `veo-3.1-lite-generate-001` (cheapest) |
-| `--duration` | Seconds: 4/6/8 (Veo3.x), 5-8 (Veo2) | `4` |
+| `--model` | Veo model ID (`veo-3.1-generate-001` / `veo-3.1-fast-generate-001` / `veo-3.1-lite-generate-001`) | `veo-3.1-lite-generate-001` (cheapest) |
+| `--duration` | Seconds: 4, 6, or 8 | `4` |
 | `--aspect-ratio` | `9:16` or `16:9` | `9:16` |
 | `--resolution` | `720p`/`1080p`/`4k` (Veo 3.x only) | model default (720p) |
 | `--sample-count` | Number of variants, 1-4 | `1` |
@@ -69,25 +74,40 @@ python3 {baseDir}/video_gen.py "morph smoothly between the two poses" \
 | `--resize-mode` | `crop` / `pad`, for input images that aren't 9:16/16:9 | API default (`pad`) |
 | `--audio` / `--no-audio` | Generate a synced audio track | off (`--no-audio`, matches the video-only cost table) |
 | `--storage-uri` | `gs://...` — write output to Cloud Storage instead of returning bytes inline | none |
+| `--force` | Overwrite `--output` if it already exists | off — refuses and exits rather than silently clobbering a prior (paid-for) result |
 
 ## Model Selection / Cost
 
-Prices are per second of *output* video. **Veo defaults to generating audio** (`generateAudio: true`
-server-side) — the video-only prices below only apply because this tool explicitly sends
-`generateAudio: false` unless `--audio` is passed. Verify current numbers at the
+Prices are USD per second of *output* video, as listed on the
 [official pricing page](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing#veo)
-before assuming these hold:
+(checked 2026-08-01 — re-verify before assuming these hold, Google revises this page without notice).
+Every model has two price tiers: with audio and without. **Veo defaults to generating audio**
+(`generateAudio: true` server-side) — you only get the video-only price if you explicitly request it.
 
-| Model | 720p | 1080p | Notes |
-|-------|------|-------|-------|
-| `veo-3.1-lite-generate-001` | $0.03/s | $0.05/s | cheapest — **default, use for iteration/testing** |
-| `veo-3.1-fast-generate-001` | $0.08/s | $0.10/s | |
-| `veo-3.1-generate-001` | $0.20/s | $0.20/s | supports 4k output |
-| `veo-2.0-generate-001` | $0.50/s | — | legacy, not cheaper despite the lower version number |
+| Model | Tier | 720p | 1080p | 4k |
+|-------|------|------|-------|-----|
+| `veo-3.1-lite-generate-001` | video only | $0.03/s | $0.05/s | — |
+| `veo-3.1-lite-generate-001` | + audio | $0.05/s | $0.08/s | — |
+| `veo-3.1-fast-generate-001` | video only | $0.08/s | $0.10/s | $0.25/s |
+| `veo-3.1-fast-generate-001` | + audio | $0.10/s | $0.12/s | $0.30/s |
+| `veo-3.1-generate-001` | video only | $0.20/s | $0.20/s | $0.40/s |
+| `veo-3.1-generate-001` | + audio | $0.40/s | $0.40/s | $0.60/s |
 
-A 4s clip on the default model costs about **$0.12**. Always default to `veo-3.1-lite-generate-001`
-and `--duration 4` for exploratory/test runs; only switch to a pricier model for a final render the
-user explicitly asked for.
+`veo-3.1-lite-generate-001` video-only 720p is the cheapest combination available — **default, use
+for iteration/testing**. (Veo 2 and the Veo 3.0 line used to be cheaper-but-lower-quality options;
+both are retired as of 2026-06-30, see above.)
+
+**To control which tier you're billed at**, this tool maps directly to the two levers above:
+
+| Want | Flags |
+|------|-------|
+| Cheapest, video only | `--model veo-3.1-lite-generate-001 --resolution 720p` (`--no-audio` is already the default) |
+| Video only, higher quality | add `--model veo-3.1-generate-001 --resolution 1080p` (or `4k`) |
+| With synced audio | add `--audio` — this alone moves you to the "+ audio" row of whatever model/resolution you picked |
+
+A 4s clip on the default (`veo-3.1-lite-generate-001`, 720p, no audio) costs about **$0.12**. Always
+default to that combination for exploratory/test runs; only switch to a pricier model or add `--audio`
+for a final render the user explicitly asked for.
 
 ## Auth Notes
 
