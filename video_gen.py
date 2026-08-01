@@ -85,6 +85,7 @@ def build_request_body(args: argparse.Namespace) -> dict:
         "aspectRatio": args.aspect_ratio,
         "durationSeconds": args.duration,
         "personGeneration": args.person_generation,
+        "generateAudio": args.audio,
     }
     if args.storage_uri:
         parameters["storageUri"] = args.storage_uri
@@ -212,9 +213,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resolution", choices=["720p", "1080p", "4k"], default=None, help="Veo 3.x only; default: model default (720p)")
     parser.add_argument("--sample-count", type=int, default=1, help="number of video variants to generate (1-4)")
     parser.add_argument("--negative-prompt", default=None)
-    parser.add_argument("--person-generation", default="allow_adult", choices=["allow_adult", "disallow"])
+    parser.add_argument("--person-generation", default="allow_adult", choices=["dont_allow", "allow_adult", "allowAll"])
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--resize-mode", choices=["crop", "pad"], default=None, help="how to fit an input image that isn't 9:16/16:9")
+    parser.add_argument("--resize-mode", choices=["crop", "pad"], default=None, help="how to fit an input image that isn't 9:16/16:9 (API default: pad)")
+    parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=False, help="generate an audio track (default: off, matches the video-only cost table)")
     parser.add_argument("--storage-uri", default=os.environ.get("VIDEO_GEN_STORAGE_URI"), help="gs:// prefix to store output instead of returning bytes inline")
     parser.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     parser.add_argument("--location", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"))

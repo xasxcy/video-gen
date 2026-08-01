@@ -27,6 +27,7 @@ def make_args(**overrides) -> argparse.Namespace:
         seed=None,
         resize_mode=None,
         storage_uri=None,
+        audio=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -38,7 +39,13 @@ def test_build_request_body_text_only():
     assert body["parameters"]["durationSeconds"] == 4
     assert body["parameters"]["aspectRatio"] == "9:16"
     assert body["parameters"]["sampleCount"] == 1
+    assert body["parameters"]["generateAudio"] is False
     assert "storageUri" not in body["parameters"]
+
+
+def test_build_request_body_audio_opt_in():
+    body = video_gen.build_request_body(make_args(audio=True))
+    assert body["parameters"]["generateAudio"] is True
 
 
 def test_build_request_body_with_image(tmp_path):
