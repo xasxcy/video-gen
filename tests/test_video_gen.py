@@ -99,6 +99,14 @@ def test_validate_duration_accepts_supported_value():
     video_gen.validate_duration("veo-3.1-lite-generate-001", 4)
 
 
+@pytest.mark.parametrize(
+    "model", ["veo-2.0-generate-001", "veo-3.0-generate-001", "veo-3.0-fast-generate-001"]
+)
+def test_validate_duration_rejects_retired_models(model):
+    with pytest.raises(ValueError, match="retired"):
+        video_gen.validate_duration(model, 4)
+
+
 def test_save_videos_inline_bytes(tmp_path):
     payload = {
         "done": True,
@@ -138,6 +146,38 @@ def test_save_videos_raises_on_rai_filtering():
 def test_save_videos_raises_on_empty_response():
     with pytest.raises(RuntimeError, match="no response payload"):
         video_gen.save_videos({"done": True}, Path("output.mp4"))
+
+
+def _inline_payload(data: bytes = b"fakevideo") -> dict:
+    return {
+        "done": True,
+        "response": {
+            "raiMediaFilteredCount": 0,
+            "videos": [{"bytesBase64Encoded": base64.b64encode(data).decode(), "mimeType": "video/mp4"}],
+        },
+    }
+
+
+def test_save_videos_refuses_to_overwrite_existing_file(tmp_path):
+    out = tmp_path / "output.mp4"
+    out.write_bytes(b"previous result, cost real money")
+    with pytest.raises(FileExistsError, match="already exists"):
+        video_gen.save_videos(_inline_payload(), out)
+    assert out.read_bytes() == b"previous result, cost real money"
+
+
+def test_save_videos_overwrites_with_force(tmp_path):
+    out = tmp_path / "output.mp4"
+    out.write_bytes(b"stale")
+    saved = video_gen.save_videos(_inline_payload(b"fresh"), out, force=True)
+    assert saved == [out]
+    assert out.read_bytes() == b"fresh"
+
+
+def test_save_videos_does_not_leave_tmp_file_behind(tmp_path):
+    out = tmp_path / "output.mp4"
+    video_gen.save_videos(_inline_payload(), out)
+    assert not out.with_name(out.name + ".tmp").exists()
 
 
 def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):

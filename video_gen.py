@@ -18,10 +18,10 @@ from google.oauth2 import service_account
 
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
+# veo-2.0-generate-001, veo-3.0-generate-001 and veo-3.0-fast-generate-001 are not listed here:
+# per Google's own model-garden pages they were retired 2026-06-30, and requests against them now
+# fail outright. Only the currently-live Veo 3.1 family is supported.
 DURATION_RANGES = {
-    "veo-2.0-generate-001": range(5, 9),
-    "veo-3.0-generate-001": (4, 6, 8),
-    "veo-3.0-fast-generate-001": (4, 6, 8),
     "veo-3.1-generate-001": (4, 6, 8),
     "veo-3.1-fast-generate-001": (4, 6, 8),
     "veo-3.1-lite-generate-001": (4, 6, 8),
@@ -101,7 +101,19 @@ def build_request_body(args: argparse.Namespace) -> dict:
     return {"instances": [instance], "parameters": parameters}
 
 
+RETIRED_MODELS = {
+    "veo-2.0-generate-001": "2026-06-30",
+    "veo-3.0-generate-001": "2026-06-30",
+    "veo-3.0-fast-generate-001": "2026-06-30",
+}
+
+
 def validate_duration(model: str, duration: int) -> None:
+    if model in RETIRED_MODELS:
+        raise ValueError(
+            f"model {model} was retired on {RETIRED_MODELS[model]} and no longer accepts requests; "
+            "use one of the veo-3.1 models instead"
+        )
     allowed = DURATION_RANGES.get(model)
     if allowed is not None and duration not in allowed:
         raise ValueError(f"model {model} does not support duration={duration}s (allowed: {list(allowed)})")
@@ -166,7 +178,21 @@ def poll_operation(
         time.sleep(poll_interval)
 
 
-def save_videos(payload: dict, output: Path) -> list[Path]:
+def _write_atomic(dest: Path, data: bytes | str, *, force: bool, text: bool = False) -> None:
+    if dest.exists() and not force:
+        raise FileExistsError(
+            f"{dest} already exists; pass --force to overwrite (a completed generation costs real "
+            "money, so this tool refuses to silently clobber a prior result)"
+        )
+    tmp = dest.with_name(dest.name + ".tmp")
+    if text:
+        tmp.write_text(data, encoding="utf-8")
+    else:
+        tmp.write_bytes(data)
+    tmp.replace(dest)  # atomic on POSIX; avoids leaving a truncated dest on a write failure
+
+
+def save_videos(payload: dict, output: Path, force: bool = False) -> list[Path]:
     response = payload.get("response")
     if not response:
         raise RuntimeError(f"operation finished with no response payload: {json.dumps(payload)[:2000]}")
@@ -185,9 +211,9 @@ def save_videos(payload: dict, output: Path) -> list[Path]:
         suffix = "" if len(videos) == 1 else f"-{i}"
         dest = output.with_name(output.stem + suffix + output.suffix)
         if "bytesBase64Encoded" in video:
-            dest.write_bytes(base64.b64decode(video["bytesBase64Encoded"]))
+            _write_atomic(dest, base64.b64decode(video["bytesBase64Encoded"]), force=force)
         elif "gcsUri" in video:
-            dest.write_text(video["gcsUri"], encoding="utf-8")
+            _write_atomic(dest, video["gcsUri"], force=force, text=True)
             print(
                 f"video stored in Cloud Storage, wrote its URI to {dest} "
                 f"(download separately with: gcloud storage cp '{video['gcsUri']}' <local-path>)",
@@ -218,6 +244,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resize-mode", choices=["crop", "pad"], default=None, help="how to fit an input image that isn't 9:16/16:9 (API default: pad)")
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=False, help="generate an audio track (default: off, matches the video-only cost table)")
     parser.add_argument("--storage-uri", default=os.environ.get("VIDEO_GEN_STORAGE_URI"), help="gs:// prefix to store output instead of returning bytes inline")
+    parser.add_argument("--force", action="store_true", help="overwrite --output if it already exists (default: refuse)")
     parser.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     parser.add_argument("--location", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"))
     parser.add_argument("--credentials", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
@@ -236,6 +263,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not args.credentials:
         print("error: --credentials or GOOGLE_APPLICATION_CREDENTIALS is required", file=sys.stderr)
+        return 2
+
+    output = Path(args.output)
+    if output.exists() and not args.force:
+        print(f"error: {output} already exists; pass --force to overwrite", file=sys.stderr)
         return 2
 
     try:
@@ -258,8 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        saved = save_videos(payload, Path(args.output))
-    except RuntimeError as exc:
+        saved = save_videos(payload, output, force=args.force)
+    except (RuntimeError, FileExistsError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
