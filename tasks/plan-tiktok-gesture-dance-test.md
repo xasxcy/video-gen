@@ -32,13 +32,13 @@
 
 ### 阶段 0：环境自检（不调用 API，免费）
 
-- [ ] 确认 `gcloud auth application-default print-access-token` 或用
+- [x] 确认 `gcloud auth application-default print-access-token` 或用
       `service_account.Credentials.from_service_account_file` 手动构造 token 不报错（用
       `hermes-vertex-key.json`，只验证能否成功换 token，不发送 Vertex 请求）
-- [ ] 确认 `project-53260abd-312a-4cb0-aa0` 已启用 `aiplatform.googleapis.com`
+- [x] 确认 `project-53260abd-312a-4cb0-aa0` 已启用 `aiplatform.googleapis.com`
       （`gcloud services list --enabled --project=... | grep aiplatform`）
-- [ ] 复制 `.env.example` → `.env`，填入项目 ID 和 key 路径（`.env` 不提交）
-- [ ] 确认 `hermes-vertex@project-53260abd-312a-4cb0-aa0.iam.gserviceaccount.com` 在该项目上有
+- [x] 复制 `.env.example` → `.env`，填入项目 ID 和 key 路径（`.env` 不提交）
+- [x] 确认 `hermes-vertex@project-53260abd-312a-4cb0-aa0.iam.gserviceaccount.com` 在该项目上有
       `roles/aiplatform.user`（按 [[hermes-secretary-profile-setup]] 记忆记录应该已有；若阶段 1 报
       403，先查这里，403 本身不计费，代价可接受）
 
@@ -51,10 +51,10 @@ uv run video_gen.py "a static shot of a red apple on a wooden table, nothing mov
   --model veo-3.1-lite-generate-001 --duration 4 --resolution 720p -o /tmp/smoke-text.mp4
 ```
 
-- [ ] 请求成功提交（拿到 operation name）
-- [ ] 轮询在合理时间内（<3 分钟）返回 `done: true`
-- [ ] `/tmp/smoke-text.mp4` 落盘且非空
-- [ ] `ffprobe /tmp/smoke-text.mp4` 能读出时长/分辨率，确认是合法 mp4
+- [x] 请求成功提交（拿到 operation name）
+- [x] 轮询在合理时间内（<3 分钟）返回 `done: true`
+- [x] `/tmp/smoke-text.mp4` 落盘且非空
+- [x] `ffprobe /tmp/smoke-text.mp4` 能读出时长/分辨率，确认是合法 mp4
 
 **若失败**：记录真实响应体完整 JSON 结构（脚本已在 `save_videos` 抛错时打印原始 payload 片段），
 **逐字段对照 `video_gen.py` 里的所有假设**（不止 `bytesBase64Encoded`/`gcsUri`/`videos`，也包括
@@ -83,11 +83,11 @@ uv run video_gen.py "$PROMPT" \
   -o /tmp/dance-attempt-1.mp4
 ```
 
-- [ ] 生成成功，`/tmp/dance-attempt-1.mp4` 落盘
-- [ ] `ffprobe /tmp/dance-attempt-1.mp4` 确认实际宽高比确实是请求的 `9:16`（不能只靠人工看关键帧判断）
-- [ ] `ffmpeg -i /tmp/dance-attempt-1.mp4 -vf "select='not(mod(n\,16))'" -vsync vfr /tmp/frames/attempt-1-%d.png`
+- [x] 生成成功，`/tmp/dance-attempt-1.mp4` 落盘
+- [x] `ffprobe /tmp/dance-attempt-1.mp4` 确认实际宽高比确实是请求的 `9:16`（不能只靠人工看关键帧判断）
+- [x] `ffmpeg -i /tmp/dance-attempt-1.mp4 -vf "select='not(mod(n\,16))'" -vsync vfr /tmp/frames/attempt-1-%d.png`
       每 16 帧抽一张（约 5-6 帧，覆盖首/中/尾，比只抽 3 帧更能看出动作节奏），零成本（本地 ffmpeg，不占预算）
-- [ ] 用 Read 工具依次查看抽出的帧图，人工判断：① 脸是否被裁掉/严重变形 ② 是否有手势舞动作、帧间是否有
+- [x] 用 Read 工具依次查看抽出的帧图，人工判断：① 脸是否被裁掉/严重变形 ② 是否有手势舞动作、帧间是否有
       连贯节奏感 ③ 是否明显崩坏（多余肢体、脸部扭曲等生成瑕疵）
 
 **若返回体里 `raiMediaFilteredCount > 0`（被责任 AI 审核过滤，`save_videos` 会直接抛异常中止）**：
@@ -108,11 +108,11 @@ uv run video_gen.py "$PROMPT" \
 
 ### 阶段 3：定稿
 
-- [ ] 选定效果最好的一条视频，另存为 `/Users/xasxcy/GitRepositories/video-gen/tests/fixtures/tiktok-gesture-dance-sample.mp4`
+- [x] 选定效果最好的一条视频，另存为 `/Users/xasxcy/GitRepositories/video-gen/tests/fixtures/tiktok-gesture-dance-sample.mp4`
       （`.gitignore` 已排除 `tests/fixtures/*.mp4`，不进仓库，只本地留档）
-- [ ] 把实际用到的 prompt、模型、参数、耗时、花费写进 `tests/README.md` 的 Run log 表格
-- [ ] 如实测中发现文档/代码描述有误（字段名、region 限制等），同步修正 `SKILL.md` / `README.md`
-- [ ] 通过 `SendUserFile` 把最终视频发给用户查看
+- [x] 把实际用到的 prompt、模型、参数、耗时、花费写进 `tests/README.md` 的 Run log 表格
+- [x] 如实测中发现文档/代码描述有误（字段名、region 限制等），同步修正 `SKILL.md` / `README.md`
+- [x] 通过 `SendUserFile` 把最终视频发给用户查看
 
 ### 阶段 4：收尾
 

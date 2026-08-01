@@ -28,3 +28,9 @@ check after changing anything that touches the request/response shape:
 
 | Date | Command | Model | Est. cost | Result |
 |------|---------|-------|-----------|--------|
+| 2026-08-01 | text-only smoke test (pre-fix, `generateAudio` unset → defaulted true server-side) | `veo-3.1-lite-generate-001`, 4s, 720p | $0.20 (video+audio rate) | Succeeded; revealed the `generateAudio` default-true bug, fixed in `video_gen.py` (`generateAudio: false` unless `--audio`) |
+| 2026-08-01 | text-only smoke test (post-fix, re-run to confirm) | `veo-3.1-lite-generate-001`, 4s, 720p | $0.12 | Succeeded, no audio track, schema fully confirmed |
+| 2026-08-01 | image-to-video, `DARK-FACE-SHAPE-001.png`, prompt: TikTok hand-gesture dance, `--aspect-ratio 9:16` | `veo-3.1-lite-generate-001`, 4s, 720p | $0.12 | Succeeded on first attempt — face intact (letterboxed, not cropped), clear hand-gesture motion, no visible artifacts. Saved as `tests/fixtures/tiktok-gesture-dance-sample.mp4` (gitignored, local only) |
+
+**Total spend this session: ~$0.44** (within the $0.6 plan budget; only 1 of the 4 budgeted
+image-to-video attempts was needed).

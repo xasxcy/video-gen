@@ -64,15 +64,18 @@ python3 {baseDir}/video_gen.py "morph smoothly between the two poses" \
 | `--resolution` | `720p`/`1080p`/`4k` (Veo 3.x only) | model default (720p) |
 | `--sample-count` | Number of variants, 1-4 | `1` |
 | `--negative-prompt` | Content to avoid | none |
-| `--person-generation` | `allow_adult` / `disallow` | `allow_adult` |
+| `--person-generation` | `dont_allow` / `allow_adult` / `allowAll` | `allow_adult` |
 | `--seed` | uint32 for deterministic output | none |
-| `--resize-mode` | `crop` / `pad`, for input images that aren't 9:16/16:9 | API default (crop) |
+| `--resize-mode` | `crop` / `pad`, for input images that aren't 9:16/16:9 | API default (`pad`) |
+| `--audio` / `--no-audio` | Generate a synced audio track | off (`--no-audio`, matches the video-only cost table) |
 | `--storage-uri` | `gs://...` — write output to Cloud Storage instead of returning bytes inline | none |
 
 ## Model Selection / Cost
 
-Prices are per second of *output* video, video-only (no audio — this tool does not request Veo's
-audio generation). Verify current numbers at the [official pricing page](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing#veo)
+Prices are per second of *output* video. **Veo defaults to generating audio** (`generateAudio: true`
+server-side) — the video-only prices below only apply because this tool explicitly sends
+`generateAudio: false` unless `--audio` is passed. Verify current numbers at the
+[official pricing page](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing#veo)
 before assuming these hold:
 
 | Model | 720p | 1080p | Notes |
@@ -96,9 +99,9 @@ user explicitly asked for.
 
 ## Known Constraints (Vertex AI, verified against official docs)
 
-- Input image: `image/png` or `image/jpeg`, ≤20 MB. Non-9:16/16:9 images are resized or center-cropped
-  server-side — for portraits where the crop matters (e.g. a face near the edge), pre-pad the image to
-  9:16 yourself before calling this tool.
+- Input image: `image/png` or `image/jpeg`, ≤20 MB. Non-9:16/16:9 images are `pad`ded by default
+  (verified: a 3:4 portrait comes back with letterboxing, not a crop) — pass `--resize-mode crop` if
+  you'd rather fill the frame and risk cutting off the edges.
 - Output: if `--storage-uri` is omitted, video bytes are returned inline in the operation response and
   written directly to `--output`. If `--storage-uri` is given, the tool writes the `gs://` URI to
   `--output` instead of bytes — download separately with `gcloud storage cp`.

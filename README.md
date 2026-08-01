@@ -69,8 +69,10 @@ its results log.
 
 - Region is hardcoded to default `us-central1` (overridable via `GOOGLE_CLOUD_LOCATION` /
   `--location`) — that's the only region Veo is currently listed as available in.
-- Non-9:16/16:9 input images get server-side resized/center-cropped; use `--resize-mode pad` or
-  pre-process the image yourself if a center-crop would cut off something important.
+- Non-9:16/16:9 input images are letterboxed (`--resize-mode pad`, the API default) rather than
+  cropped; pass `--resize-mode crop` if you'd rather fill the frame.
+- Veo generates audio by default server-side; this tool sends `generateAudio: false` unless you pass
+  `--audio`, to match the video-only prices quoted below.
 - No retry/backoff on transient API errors yet — a failed request just exits non-zero.
 
 ## License
