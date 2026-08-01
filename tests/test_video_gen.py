@@ -265,6 +265,33 @@ def test_write_exclusive_cleans_up_on_write_failure(tmp_path, monkeypatch):
     with pytest.raises(OSError, match="disk full"):
         video_gen._write_exclusive(dest, b"data")
     assert not dest.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_exclusive_failure_never_touches_a_concurrently_written_dest(tmp_path, monkeypatch):
+    # Regression test for round-4 finding: the previous implementation unlinked *dest*
+    # by path on write failure, which would destroy a result a concurrent --force call
+    # had *just* published to that same path in the failure window. Simulate that by
+    # pre-populating dest (standing in for "a concurrent force write already landed
+    # here") before triggering our own write failure, and assert it survives untouched.
+    dest = tmp_path / "output.mp4"
+    dest.write_bytes(b"result from a concurrent --force run, must survive")
+
+    class ExplodingFile:
+        def write(self, data):
+            raise OSError("disk full")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(os, "fdopen", lambda fd, mode: ExplodingFile())
+    with pytest.raises(OSError, match="disk full"):
+        video_gen._write_exclusive(dest, b"this must not land and must not delete dest either")
+    assert dest.read_bytes() == b"result from a concurrent --force run, must survive"
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_write_atomic_force_cleans_up_tmp_on_write_failure(tmp_path, monkeypatch):

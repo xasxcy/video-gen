@@ -196,24 +196,29 @@ def expected_output_paths(output: Path, sample_count: int) -> list[Path]:
 def _write_exclusive(dest: Path, data: bytes | str, *, text: bool = False) -> None:
     """Create dest only if it doesn't already exist, atomically (no check-then-write gap).
 
-    Uses O_EXCL so two concurrent calls targeting the same dest can't both "pass" a
-    prior os.path.exists() check and then race each other via a temp-file replace —
-    the OS guarantees only one open() with O_CREAT|O_EXCL succeeds.
+    Writes to a private temp file first, then publishes via os.link() — a hard link only
+    succeeds if dest doesn't already exist, so two concurrent calls targeting the same
+    dest can't both "pass" a prior os.path.exists() check and clobber each other, and
+    cleanup on any failure only ever removes our own temp file, never dest itself. (An
+    earlier version wrote directly into dest under O_CREAT|O_EXCL and unlinked dest by
+    path on write failure — safe against concurrent *creators* of dest, but not against
+    a concurrent --force replace() landing in that same failure window, which that
+    unlink would have destroyed.)
     """
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    try:
-        fd = os.open(dest, flags)
-    except FileExistsError:
-        raise FileExistsError(
-            f"{dest} already exists; pass --force to overwrite (a completed generation costs real "
-            "money, so this tool refuses to silently clobber a prior result)"
-        ) from None
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=dest.name + ".", suffix=".tmp")
+    tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w" if text else "wb") as f:
             f.write(data)
-    except BaseException:
-        dest.unlink(missing_ok=True)
-        raise
+        try:
+            os.link(tmp, dest)
+        except FileExistsError:
+            raise FileExistsError(
+                f"{dest} already exists; pass --force to overwrite (a completed generation costs "
+                "real money, so this tool refuses to silently clobber a prior result)"
+            ) from None
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _write_atomic_force(dest: Path, data: bytes | str, *, text: bool = False) -> None:
