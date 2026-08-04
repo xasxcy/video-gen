@@ -83,7 +83,7 @@ python3 {baseDir}/video_gen.py "morph smoothly between the two poses" \
 | `--person-generation` | `dont_allow` / `allow_adult` / `allowAll` | `allow_adult` |
 | `--seed` | uint32 for deterministic output | none |
 | `--resize-mode` | `crop` / `pad`, for input images that aren't 9:16/16:9 | API default (`pad`) |
-| `--audio` / `--no-audio` | Generate a synced audio track | on (`--audio`, default) |
+| `--audio` / `--no-audio` | Generate a synced audio track | off (`--no-audio`, default) |
 | `--storage-uri` | `gs://...` — write output to Cloud Storage instead of returning bytes inline | none |
 | `--force` | Overwrite `--output` if it already exists | off — refuses and exits rather than silently clobbering a prior (paid-for) result |
 
@@ -206,7 +206,7 @@ python3 {baseDir}/video_gen_omni.py "unused-when---interaction-is-set" \
 | `--interaction` | Resume mode: an interaction resource name from a prior `--background` submission — skips submit, goes straight to poll/fetch | none |
 | `--project` / `--location` | GCP project / region — **default location is `global`**, not `video_gen.py`'s `us-central1` | `GOOGLE_CLOUD_PROJECT` / `global` |
 | `--credentials` | Service-account key path | `GOOGLE_APPLICATION_CREDENTIALS` |
-| `--poll-interval` / `--timeout` | Polling cadence / max wait for `--background` or `--interaction` | `15s` / `600s` |
+| `--poll-interval` / `--timeout` | Polling cadence / max wait — **only applies to `--interaction` resume mode**; a fresh `--background` submission returns immediately after printing the interaction name and never polls | `15s` / `600s` |
 
 Not offered (deliberately, given current model limits): `--resolution` (fixed 720p, no 1080p/4k),
 `--audio`/`--no-audio` (video output always includes audio, no way to disable), `--last-frame` (no
@@ -229,3 +229,10 @@ supported by this CLI; the API's per-prompt count parameter isn't wired up).
   exercised against a live response.
 - **`status: "failed"` responses are unverified** — polling/error-handling for a failed interaction
   is implemented defensively but has never been observed against a real failed request.
+- **A lost submission response is unrecoverable** — if `submit_interaction`'s POST fails at the
+  network layer (timeout, connection reset) *after* Vertex has already accepted and started billing
+  the request, this CLI has no interaction id to reconcile against and `--interaction` cannot help,
+  since it never received one. The Interactions API has no documented client-supplied idempotency/
+  correlation key to recover from this, so `submit_interaction` only surfaces the uncertainty in its
+  error message (check the Vertex AI console) — it does not, and currently cannot, actually recover
+  the job. Do not blindly retry after this specific error; it may create a duplicate paid generation.

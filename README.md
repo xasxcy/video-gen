@@ -106,7 +106,8 @@ its results log.
 - Non-9:16/16:9 input images are letterboxed (`--resize-mode pad`, the API default) rather than
   cropped; pass `--resize-mode crop` if you'd rather fill the frame.
 - Veo generates audio by default server-side; this tool sends `generateAudio: false` unless you pass
-  `--audio`, to match the video-only prices quoted below.
+  `--audio`, to match the video-only prices quoted below (see `tests/README.md` run log 2026-08-01 for
+  the incident that prompted this).
 - No retry/backoff on transient API errors yet — a failed request just exits non-zero.
 
 ## License
