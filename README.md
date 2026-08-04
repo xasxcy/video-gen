@@ -1,8 +1,18 @@
 # video-gen
 
-A small CLI for generating videos with Google **Veo** on **Vertex AI** — text-to-video and
-image-to-video (first frame, or first+last frame interpolation) — via the `predictLongRunning`
-REST API, with no dependency on the `google-genai` SDK or a Cloud Storage bucket for small clips.
+Two CLIs for generating videos on Google **Vertex AI** (now renamed **Gemini Enterprise Agent
+Platform** — the `aiplatform.googleapis.com` endpoint is unchanged, this README just keeps saying
+"Vertex AI" since that's still the common name):
+
+- **`video_gen.py`** — Google **Veo** (`predictLongRunning` REST API): text-to-video and
+  image-to-video, up to 1080p/4k, first+last frame interpolation, clips up to 8s.
+- **`video_gen_omni.py`** — Google **Gemini Omni Flash** (Interactions API): a separate, simpler
+  script for short clips (≤10s), fixed 720p, always with audio. See
+  [Gemini Omni Flash](SKILL.md#gemini-omni-flash-short-clip-alternative) in `SKILL.md` for usage,
+  full flag list, and what it deliberately doesn't support yet.
+
+Both talk to the REST API directly with no dependency on the `google-genai` SDK, and (for Veo) no
+Cloud Storage bucket requirement for small clips.
 
 See [`SKILL.md`](SKILL.md) for the agent/skill-oriented reference (flags, cost table, auth notes).
 This README covers human setup and local usage.
@@ -54,6 +64,22 @@ dead endpoint.
 
 By default the CLI refuses to overwrite an existing `--output` path (a completed generation costs
 real money) — pass `--force` if you actually want to replace it.
+
+### Omni Flash (short clips)
+
+Same `.env` / credentials as above. `video_gen_omni.py` is a separate script — see
+[SKILL.md](SKILL.md#gemini-omni-flash-short-clip-alternative) for the full flag list, cost model,
+and v1 scope (no multi-turn editing, no `reference_to_video`).
+
+```bash
+# Text-to-video, 3s (cheapest, and the shortest Omni allows)
+uv run video_gen_omni.py "a cat reading a book by a window" -o cat.mp4
+
+# Image-to-video, up to 10s
+uv run video_gen_omni.py "she waves and smiles" --image ./portrait.png -o wave.mp4 --duration 6
+```
+
+Omni Flash clips are capped at 10s, fixed at 720p, and always include audio (no video-only tier).
 
 ## Cost
 

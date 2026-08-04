@@ -11,9 +11,18 @@ metadata:
 
 # Video Generation (Veo on Vertex AI)
 
+> Google has renamed **Vertex AI** to **Gemini Enterprise Agent Platform** (docs now live under
+> `docs.cloud.google.com/gemini-enterprise-agent-platform/...`); the `aiplatform.googleapis.com`
+> endpoint itself is unchanged. This doc still says "Vertex AI" throughout since that's still the
+> commonly-used name and matches the API host — just noting the rename here rather than doing a
+> full find-replace.
+
 Calls Google Veo (`veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, `veo-3.1-lite-generate-001`)
 through Vertex AI's `predictLongRunning` REST API. Supports text-to-video and image-to-video
 (first frame, optionally first+last frame).
+
+For short clips (≤10s) or image-to-video with no need for interpolation, see
+[Gemini Omni Flash](#gemini-omni-flash-short-clip-alternative) below — a separate, simpler script.
 
 `veo-2.0-generate-001`, `veo-3.0-generate-001` and `veo-3.0-fast-generate-001` are **not** supported —
 Google retired all three on 2026-06-30 (confirmed on their model-garden pages) and requests against
@@ -66,13 +75,15 @@ python3 {baseDir}/video_gen.py "morph smoothly between the two poses" \
 | `--model` | Veo model ID (`veo-3.1-generate-001` / `veo-3.1-fast-generate-001` / `veo-3.1-lite-generate-001`) | `veo-3.1-lite-generate-001` (cheapest) |
 | `--duration` | Seconds: 4, 6, or 8 | `4` |
 | `--aspect-ratio` | `9:16` or `16:9` | `9:16` |
+
+> **调用方约束（时长判断）**：调用方（Agent/用户）在生成视频前，**必须自行评估动作或动作链的预计所需时长**，选择最合适的秒数（4秒、6秒或8秒）。切勿盲目依赖默认的 4 秒——若动作过于复杂或包含多个连贯步骤，4 秒会导致动作未完成即被截断，或被分割/快进成多段片段。
 | `--resolution` | `720p`/`1080p`/`4k` (Veo 3.x only) | model default (720p) |
 | `--sample-count` | Number of variants, 1-4 | `1` |
 | `--negative-prompt` | Content to avoid | none |
 | `--person-generation` | `dont_allow` / `allow_adult` / `allowAll` | `allow_adult` |
 | `--seed` | uint32 for deterministic output | none |
 | `--resize-mode` | `crop` / `pad`, for input images that aren't 9:16/16:9 | API default (`pad`) |
-| `--audio` / `--no-audio` | Generate a synced audio track | off (`--no-audio`, matches the video-only cost table) |
+| `--audio` / `--no-audio` | Generate a synced audio track | on (`--audio`, default) |
 | `--storage-uri` | `gs://...` — write output to Cloud Storage instead of returning bytes inline | none |
 | `--force` | Overwrite `--output` if it already exists | off — refuses and exits rather than silently clobbering a prior (paid-for) result |
 
@@ -127,3 +138,94 @@ for a final render the user explicitly asked for.
   `--output` instead of bytes — download separately with `gcloud storage cp`.
 - Long-running operation: submission returns immediately; the tool polls `fetchPredictOperation` every
   `--poll-interval` seconds (default 15) until done or `--timeout` (default 600s) is hit.
+
+## Gemini Omni Flash (short-clip alternative)
+
+`video_gen_omni.py` calls Google's **Gemini Omni Flash** (`gemini-omni-flash-preview`) through the
+Interactions API (`POST .../v1beta1/projects/{project}/locations/global/interactions`) — a
+completely different endpoint/request shape from Veo's `predictLongRunning`, so it's a separate
+script rather than a `--model` branch on `video_gen.py`. It only shares `_auth.py` (service-account
+token exchange) with `video_gen.py`.
+
+**Agent Execution**: script path = `{baseDir}/video_gen_omni.py`; same runtime options as
+`video_gen.py` above (`uv run` or `python3` directly).
+
+### When to use Omni instead of Veo
+
+- You need a clip **10 seconds or under**.
+- You're doing image-to-video and just need the reference image to drive the first frame (no
+  interpolation, no first+last-frame morph).
+
+For anything longer than 10s, 1080p/4k, first+last-frame interpolation, or Veo's multi-reference-image
+subject consistency, use `video_gen.py` (Veo) instead — Omni Flash doesn't support any of those.
+
+### v1 scope — explicitly NOT implemented
+
+Omni Flash's API supports these capabilities, but **this CLI does not implement them yet**:
+
+- **Multi-turn conversational editing** (chaining `steps` from a prior interaction into the next
+  request's `input` to iteratively edit a video). This needs client-side conversation-state
+  management that `video_gen_omni.py` doesn't have.
+- **`reference_to_video`** (regenerating a video driven by a reference image for subject
+  consistency, as distinct from plain image-to-video). The request-body shape for this task type
+  hasn't been implemented or verified.
+
+Don't imply either of these works when describing this tool — they're real Omni Flash capabilities,
+just not ones this script exposes.
+
+### Usage
+
+```bash
+# Text-to-video, cheapest (3s, the minimum Omni allows)
+python3 {baseDir}/video_gen_omni.py "a cat reading a book by a window" -o cat.mp4
+
+# Image-to-video (first frame drives the clip; image is inlined as base64, not GCS)
+python3 {baseDir}/video_gen_omni.py "the woman smiles and does a quick hand-wave" \
+  --image ./portrait.png -o dance.mp4 --duration 5
+
+# Async submission (result kept 14 days), then recover it later without resubmitting/re-paying
+python3 {baseDir}/video_gen_omni.py "..." --background -o clip.mp4
+# ... prints "interaction: projects/P/locations/global/interactions/ID" to stderr; later:
+python3 {baseDir}/video_gen_omni.py "unused-when---interaction-is-set" \
+  --interaction projects/P/locations/global/interactions/ID -o clip.mp4
+```
+
+### Options Reference
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `prompt` (positional) | Text prompt describing the desired video | required |
+| `--image` | Local path, inlined as base64 (image-to-video, first frame only) | none (text-to-video) |
+| `-o`, `--output` | Output video path | `output.mp4` |
+| `--model` | Omni Flash model ID | `gemini-omni-flash-preview` |
+| `--duration` | Seconds, **3-10** (hard cap, no exceptions) | `3` (cheapest) |
+| `--aspect-ratio` | `9:16` or `16:9` | `9:16` |
+| `--storage-uri` | `gs://...` — deliver output to Cloud Storage instead of inline base64 | none (inline) |
+| `--force` | Overwrite `--output` if it already exists | off |
+| `--background` | Submit asynchronously instead of waiting inline; result is retrievable for 14 days | off (synchronous) |
+| `--interaction` | Resume mode: an interaction resource name from a prior `--background` submission — skips submit, goes straight to poll/fetch | none |
+| `--project` / `--location` | GCP project / region — **default location is `global`**, not `video_gen.py`'s `us-central1` | `GOOGLE_CLOUD_PROJECT` / `global` |
+| `--credentials` | Service-account key path | `GOOGLE_APPLICATION_CREDENTIALS` |
+| `--poll-interval` / `--timeout` | Polling cadence / max wait for `--background` or `--interaction` | `15s` / `600s` |
+
+Not offered (deliberately, given current model limits): `--resolution` (fixed 720p, no 1080p/4k),
+`--audio`/`--no-audio` (video output always includes audio, no way to disable), `--last-frame` (no
+first+last-frame interpolation support), `--sample-count` (only one video per interaction is
+supported by this CLI; the API's per-prompt count parameter isn't wired up).
+
+### Known limits
+
+- **10-second hard cap** on `--duration` — `video_gen_omni.py` rejects anything outside 3-10s before
+  making a request.
+- **Fixed 720p** — no resolution flag exists because there's nothing to choose between.
+- **No frame interpolation** — Omni Flash has no first+last-frame morphing feature.
+- **Video output always has audio** — there is no video-only tier/flag, unlike Veo.
+- **Mixed billing**: $0.10/s video output (720p, with audio) *plus* separate input/output token
+  charges (text/image/video/audio input $1.50/M tokens, text output $9/M tokens) — costs aren't a
+  flat per-second number the way Veo's video-only tier is. See the pricing page linked in the Veo
+  cost section above (Omni Flash pricing is on the same page).
+- **`delivery: "uri"` (GCS output) is unverified** — actual real-API testing so far only exercised
+  inline base64 delivery (`--storage-uri` unset). The GCS-URI code path exists but hasn't been
+  exercised against a live response.
+- **`status: "failed"` responses are unverified** — polling/error-handling for a failed interaction
+  is implemented defensively but has never been observed against a real failed request.
