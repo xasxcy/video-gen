@@ -237,6 +237,18 @@ def test_submit_interaction_error_extracts_message_field(monkeypatch):
         video_gen_omni.submit_interaction("proj", "global", "tok", {"model": "m"})
 
 
+def test_submit_interaction_network_failure_surfaces_uncertainty(monkeypatch):
+    # A timeout/connection error means we don't know whether the server accepted the
+    # request — must not be silently swallowed or retried, and must not look like an
+    # ordinary "clean failure" (no interaction was ever created).
+    def fake_post(url, headers=None, data=None, timeout=None):
+        raise video_gen_omni.requests.exceptions.ConnectionError("connection reset")
+
+    monkeypatch.setattr(video_gen_omni.requests, "post", fake_post)
+    with pytest.raises(RuntimeError, match="submission outcome is unknown"):
+        video_gen_omni.submit_interaction("proj", "global", "tok", {"model": "m"})
+
+
 # ---------------------------------------------------------------------------
 # poll_interaction
 # ---------------------------------------------------------------------------
@@ -385,6 +397,40 @@ def test_main_interaction_resume_mode_skips_submit(monkeypatch, tmp_path):
     assert submit_called == []
     assert poll_called["interaction_name"] == "projects/proj/locations/global/interactions/resume-me"
     assert out.read_text() == "gs://bucket/out/sample.mp4"
+
+
+def test_main_background_submit_returns_without_polling(monkeypatch, tmp_path, capsys):
+    # --background must behave asynchronously: return right after submit, never block on
+    # poll_interaction in this process (that's what SKILL.md promises and what makes a
+    # network-layer failure during polling not look like a failed submission).
+    out = tmp_path / "output.mp4"
+
+    monkeypatch.setattr(video_gen_omni, "load_env_file", lambda path: None)
+    monkeypatch.setattr(video_gen_omni, "get_access_token", lambda creds: "tok")
+    monkeypatch.setattr(
+        video_gen_omni,
+        "submit_interaction",
+        lambda *a, **k: {"id": "abc123", "name": "projects/proj/locations/global/interactions/abc123"},
+    )
+
+    poll_called = []
+    monkeypatch.setattr(
+        video_gen_omni, "poll_interaction", lambda *a, **k: poll_called.append(1) or {}
+    )
+
+    rc = video_gen_omni.main(
+        [
+            "a cat",
+            "--project", "proj",
+            "--credentials", "creds.json",
+            "--background",
+            "-o", str(out),
+        ]
+    )
+    assert rc == 0
+    assert poll_called == []
+    captured = capsys.readouterr()
+    assert "projects/proj/locations/global/interactions/abc123" in captured.err
 
 
 def test_main_requires_project(monkeypatch):

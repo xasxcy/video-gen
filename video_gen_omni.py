@@ -112,15 +112,28 @@ def _safe_error_message(resp: requests.Response) -> str:
 
 def submit_interaction(project: str, location: str, token: str, body: dict) -> dict:
     url = f"https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{location}/interactions"
-    resp = requests.post(
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json; charset=utf-8",
-        },
-        data=json.dumps(body),
-        timeout=60,
-    )
+    try:
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            data=json.dumps(body),
+            timeout=60,
+        )
+    except requests.exceptions.RequestException as exc:
+        # A network-level failure here (timeout, connection reset) doesn't tell us whether
+        # the server ever received/accepted the request — it may already be running (and
+        # billing) as an interaction we have no id for, so --interaction can't recover it.
+        # Don't retry blindly (risks a duplicate paid submission); surface the uncertainty
+        # instead so the caller can check the Vertex AI console before deciding what to do.
+        raise RuntimeError(
+            f"interactions.create request failed before a response was received ({exc}); "
+            "submission outcome is unknown — check the Vertex AI Interactions console for "
+            "this project/location before retrying, an interaction may already be running "
+            "and billing without a captured id"
+        ) from exc
     if not resp.ok:
         raise RuntimeError(f"interactions.create failed ({resp.status_code}): {_safe_error_message(resp)}")
     result = resp.json()
@@ -320,8 +333,17 @@ def main(argv: list[str] | None = None) -> int:
             print(str(saved))
             return 0
 
-        interaction_name = result["name"]
+        # --background 是"异步提交"：submit_interaction 已经打印了 interaction 资源名，这里
+        # 直接返回，不在本进程里阻塞轮询——否则和文档承诺的"instead of waiting inline"矛盾，
+        # 也会让网络中断/本地超时表现得像提交失败。真正等结果用 --interaction 恢复模式。
+        print(
+            f"submitted for background processing (result kept 14 days); "
+            f"fetch it later with: --interaction {result['name']} -o {output}",
+            file=sys.stderr,
+        )
+        return 0
 
+    # 只有 --interaction 恢复模式会走到这里：拿一个已提交任务的资源名，等它跑完再保存。
     payload = poll_interaction(
         args.project, args.location, token,
         interaction_name, args.poll_interval, args.timeout,

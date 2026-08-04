@@ -280,7 +280,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--person-generation", default="allow_adult", choices=["dont_allow", "allow_adult", "allowAll"])
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--resize-mode", choices=["crop", "pad"], default=None, help="how to fit an input image that isn't 9:16/16:9 (API default: pad)")
-    parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=False, help="generate an audio track (default: off, matches the video-only cost table)")
+    parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=False, help="generate an audio track (default: off — the API defaults to on server-side if unset, which silently bills the pricier audio tier; see tests/README.md run log 2026-08-01)")
     parser.add_argument("--storage-uri", default=os.environ.get("VIDEO_GEN_STORAGE_URI"), help="gs:// prefix to store output instead of returning bytes inline")
     parser.add_argument("--force", action="store_true", help="overwrite --output if it already exists (default: refuse)")
     parser.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))

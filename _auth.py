@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 from google.auth.transport.requests import Request as AuthRequest
@@ -26,34 +25,13 @@ def load_env_file(path: Path) -> None:
 
 
 def get_access_token(credentials_path: str) -> str:
-    # Try service account key first
-    try:
-        creds = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=SCOPES
-        )
-        creds.refresh(AuthRequest())
-        return creds.token
-    except Exception:
-        pass
-
-    # Try ADC
-    try:
-        creds, _ = google.auth.default(scopes=SCOPES)
-        creds.refresh(AuthRequest())
-        return creds.token
-    except Exception:
-        pass
-
-    # Fall back to gcloud CLI
-    try:
-        out = subprocess.check_output(
-            ["/Users/xasxcy/google-cloud-sdk/bin/gcloud", "auth", "print-access-token"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-        if out:
-            return out
-    except Exception:
-        pass
-
-    raise RuntimeError("Failed to obtain GCP access token")
+    # Fail closed on the explicitly supplied service account key: a missing, revoked, or
+    # malformed key must surface as an error, never fall through to whatever ambient identity
+    # (ADC, a locally logged-in gcloud CLI) happens to be active on the machine — that identity
+    # can have different project/billing access, so a silent fallback risks submitting (and
+    # paying for) a request under the wrong account without telling the caller.
+    creds = service_account.Credentials.from_service_account_file(
+        credentials_path, scopes=SCOPES
+    )
+    creds.refresh(AuthRequest())
+    return creds.token

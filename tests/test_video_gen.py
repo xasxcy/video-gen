@@ -50,6 +50,16 @@ def test_build_request_body_audio_opt_in():
     assert body["parameters"]["generateAudio"] is True
 
 
+def test_parse_args_audio_defaults_off():
+    args = video_gen.parse_args(["a cat"])
+    assert args.audio is False
+
+
+def test_parse_args_audio_opt_in_flag():
+    args = video_gen.parse_args(["a cat", "--audio"])
+    assert args.audio is True
+
+
 def test_build_request_body_with_image(tmp_path):
     png = tmp_path / "frame.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\nfakepngdata")
