@@ -1,0 +1,57 @@
+{
+  "id": "FAKE_INTERACTION_ID_1234567890",
+  "status": "completed",
+  "usage": {
+    "total_tokens": 17674,
+    "total_input_tokens": 14,
+    "input_tokens_by_modality": [
+      {
+        "modality": "text",
+        "tokens": 14
+      }
+    ],
+    "total_output_tokens": 17376,
+    "output_tokens_by_modality": [
+      {
+        "modality": "video",
+        "tokens": 17376
+      }
+    ],
+    "total_tool_use_tokens": 0,
+    "total_thought_tokens": 284
+  },
+  "role": "model",
+  "steps": [
+    {
+      "type": "user_input",
+      "content": [
+        {
+          "text": "a paper airplane gliding over a city skyline",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "signature": "REDACTED_SIGNATURE_PLACEHOLDER",
+      "summary": [
+        {
+          "type": "text",
+          "text": "REDACTED_THOUGHT_SUMMARY"
+        }
+      ],
+      "type": "thought"
+    },
+    {
+      "content": [
+        {
+          "mime_type": "video/mp4",
+          "data": "RkFLRV9CQVNFNjRfUExBQ0VIT0xERVI=",
+          "type": "video"
+        }
+      ],
+      "type": "model_output"
+    }
+  ],
+  "object": "interaction",
+  "model": "gemini-omni-flash-preview"
+}

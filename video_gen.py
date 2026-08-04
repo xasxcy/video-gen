@@ -14,10 +14,8 @@ import time
 from pathlib import Path
 
 import requests
-from google.auth.transport.requests import Request as AuthRequest
-from google.oauth2 import service_account
 
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+from _auth import SCOPES, get_access_token, load_env_file
 
 # veo-2.0-generate-001, veo-3.0-generate-001 and veo-3.0-fast-generate-001 are not listed here:
 # per Google's own model-garden pages they were retired 2026-06-30, and requests against them now
@@ -29,27 +27,6 @@ DURATION_RANGES = {
 }
 
 DEFAULT_MODEL = os.environ.get("VIDEO_GEN_MODEL", "veo-3.1-lite-generate-001")
-
-
-def load_env_file(path: Path) -> None:
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
-
-
-def get_access_token(credentials_path: str) -> str:
-    creds = service_account.Credentials.from_service_account_file(
-        credentials_path, scopes=SCOPES
-    )
-    creds.refresh(AuthRequest())
-    return creds.token
 
 
 def guess_mime_type(path: Path) -> str:
